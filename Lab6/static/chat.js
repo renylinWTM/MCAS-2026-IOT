@@ -99,7 +99,7 @@ form.addEventListener(
             }
 
             addMessage(
-                "Gemini："
+                "OpenRouter："
                 + data.reply,
                 "ai"
             );
@@ -145,7 +145,7 @@ resetButton.addEventListener(
             messages.innerHTML = "";
 
             addMessage(
-                "Gemini：已開始新的對話。",
+                "OpenRouter：已開始新的對話。",
                 "ai"
             );
         }

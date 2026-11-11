@@ -11,7 +11,7 @@ from flask import (
     session,
     url_for,
 )
-from google import genai
+from openai import OpenAI
 
 
 # =========================
@@ -20,16 +20,16 @@ from google import genai
 
 load_dotenv()
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 SECRET_KEY = os.getenv("SECRET_KEY")
-GEMINI_MODEL = os.getenv(
-    "GEMINI_MODEL",
-    "gemini-3.8-flash",
+OPENROUTER_MODEL = os.getenv(
+    "OPENROUTER_MODEL",
+    "openrouter/free",
 )
 
-if not GEMINI_API_KEY:
+if not OPENROUTER_API_KEY:
     raise RuntimeError(
-        "找不到 GEMINI_API_KEY，請先建立 .env 並填入 API Key。"
+        "找不到 OPENROUTER_API_KEY，請先建立 .env 並填入 API Key。"
     )
 
 if not SECRET_KEY or SECRET_KEY == "CHANGE_ME":
@@ -54,42 +54,78 @@ USERS = {
 
 
 # =========================
-# Gemini
+# OpenAI
 # =========================
 
-gemini_client = genai.Client(
-    api_key=GEMINI_API_KEY
+openrouter_client = OpenAI(
+    api_key=OPENROUTER_API_KEY,
+    base_url="https://openrouter.ai/api/v1",
 )
 
 
-def ask_gemini(
+def ask_openrouter(
     message,
-    previous_interaction_id=None,
+    history=None,
 ):
-    params = {
-        "model": GEMINI_MODEL,
-        "input": message,
-    }
+    history = history or []
 
-    if previous_interaction_id:
-        params["previous_interaction_id"] = (
-            previous_interaction_id
-        )
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "你是 Lab6 聊天網站的 AI 助手。"
+                "這個網站透過 OpenRouter API 串接 AI 模型。"
+                f"目前設定的路由模型是 {OPENROUTER_MODEL}。"
+                "如果使用者詢問你使用什麼 API，"
+                "請回答：此網站透過 OpenRouter API 提供 AI 回覆。"
+                "不要宣稱自己固定是 Gemini 或特定 GPT 型號，"
+                "因為 openrouter/free 可能選用不同的免費模型。"
+            ),
+        }
+    ]
 
-    interaction = (
-        gemini_client.interactions.create(
-            **params
+    for item in history[-4:]:
+        role = item.get("role")
+        content = str(
+            item.get("content", "")
+        ).strip()
+
+        if (
+            role in {"user", "assistant"}
+            and content
+        ):
+            messages.append({
+                "role": role,
+                "content": content,
+            })
+
+    messages.append({
+        "role": "user",
+        "content": message,
+    })
+
+    completion = (
+        openrouter_client
+        .chat
+        .completions
+        .create(
+            model=OPENROUTER_MODEL,
+            messages=messages,
         )
     )
 
     reply = (
-        interaction.output_text or ""
+        completion
+        .choices[0]
+        .message
+        .content
+        or ""
     ).strip()
 
     if not reply:
-        reply = "Gemini 沒有回傳文字內容。"
+        reply = "OpenRouter 沒有回傳文字內容。"
 
-    return reply, interaction.id
+    return reply
 
 
 # =========================
@@ -184,7 +220,7 @@ def chat_room():
 
 
 # =========================
-# Gemini API
+# OpenAI API
 # =========================
 
 @app.post("/api/chat")
@@ -214,22 +250,30 @@ def api_chat():
 
     try:
 
-        previous_id = session.get(
-            "gemini_interaction_id"
+        history = session.get(
+            "chat_history",
+            [],
         )
 
-        reply, interaction_id = (
-            ask_gemini(
-                message,
-                previous_id,
-            )
+        reply = ask_openrouter(
+            message,
+            history,
         )
 
-        # 保存本次 interaction ID
-        # 下一輪即可延續對話
-        session[
-            "gemini_interaction_id"
-        ] = interaction_id
+        history.extend([
+            {
+                "role": "user",
+                "content": message[:700],
+            },
+            {
+                "role": "assistant",
+                "content": reply[:700],
+            },
+        ])
+
+        session["chat_history"] = (
+            history[-4:]
+        )
 
         return jsonify({
             "reply": reply
@@ -238,13 +282,13 @@ def api_chat():
     except Exception as error:
 
         print(
-            "[Gemini API Error]",
+            "[OpenAI API Error]","[OpenRouter API Error]",
             error,
         )
 
         return jsonify({
             "error":
-            "Gemini API 呼叫失敗，"
+            "OpenAI API 呼叫失敗，"
             "請檢查 API Key、網路或模型設定。"
         }), 502
 
@@ -258,7 +302,7 @@ def api_chat():
 def reset_chat():
 
     session.pop(
-        "gemini_interaction_id",
+        "chat_history",
         None,
     )
 
